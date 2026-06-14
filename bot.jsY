@@ -1,0 +1,52 @@
+require("dotenv").config();
+const { Telegraf } = require("telegraf");
+
+console.log("🤖 bot starting...");
+
+const bot = new Telegraf(process.env.BOT_TOKEN);
+
+let chats = new Set();
+let running = true;
+
+// 记录群
+bot.on("message", (ctx) => {
+  if (ctx.chat.type.includes("group")) {
+    chats.add(ctx.chat.id);
+  }
+});
+
+// 开启
+bot.command("startdice", (ctx) => {
+  if (ctx.from.id != process.env.ADMIN_ID) return;
+  running = true;
+  ctx.reply("🎲 自动骰子已开启");
+});
+
+// 关闭
+bot.command("stopdice", (ctx) => {
+  if (ctx.from.id != process.env.ADMIN_ID) return;
+  running = false;
+  ctx.reply("⛔ 自动骰子已关闭");
+});
+
+// 随机骰子
+function roll() {
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+// 定时发送
+setInterval(() => {
+  if (!running) return;
+
+  const result = roll();
+  const msg = `🎲 自动骰子：${result}`;
+
+  chats.forEach(chatId => {
+    bot.telegram.sendMessage(chatId, msg);
+  });
+
+}, parseInt(process.env.INTERVAL) * 1000);
+
+bot.launch();
+console.log("🤖 bot running...");nano bot.js
+
