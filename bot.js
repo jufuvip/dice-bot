@@ -142,7 +142,9 @@ bot.command("score", (ctx) => {
   ctx.reply(`💰 你的积分：${getUser(id)}`);
 });
 
-bot.launch().then(() => {
+bot.launch({
+  dropPendingUpdates: true
+});.then(() => {
   console.log("🤖 bot running...");
 }).catch((err) => {
   console.log("启动失败：", err);
