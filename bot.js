@@ -1,151 +1,175 @@
-require("dotenv").config({ path: "./config.env" });
-const { Telegraf } = require("telegraf");
+const { Telegraf } = require('telegraf');
+require('dotenv').config();
 
+// ===== 防止重复启动 =====
+if (global.__casino_running) {
+  console.log("⚠️ bot already running");
+  process.exit();
+}
+global.__casino_running = true;
+
+// ===== 初始化 =====
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// ===== 积分数据库（先内存版）=====
-const users = {};
+const ADMIN_ID = Number(process.env.ADMIN_ID);
+const GROUP_ID = process.env.GROUP_ID;
 
-// 默认积分
+// ===== 数据 =====
+let users = {};
+let bets = {};
+let status = "betting";
+let userMap = {}; // 存昵称
+
+// ===== 积分 =====
 function getUser(id) {
   if (!users[id]) users[id] = 1000;
   return users[id];
 }
 
-// 骰子
-function roll() {
-  return Math.floor(Math.random() * 6) + 1;
+function addUser(id, amount) {
+  if (!users[id]) users[id] = 1000;
+  users[id] += amount;
 }
 
-// 判断输赢
-function checkWin(bet, result) {
-  if (bet === "单") return [1,3,5].includes(result);
-  if (bet === "双") return [2,4,6].includes(result);
-  if (bet === "大") return [4,5,6].includes(result);
-  if (bet === "小") return [1,2,3].includes(result);
-  return false;
-}
+// ===== 日志 =====
+bot.use((ctx, next) => {
+  console.log("📩", ctx.message?.text);
+  return next();
+});
 
-// ===== 下注 =====
+// ===== /start =====
+bot.start((ctx) => {
+  const id = ctx.from.id;
+
+  userMap[id] = ctx.from.username || ctx.from.first_name;
+
+  ctx.reply(`🎰赌场启动\n💰积分：${getUser(id)}`);
+});
+
+// ===== 查积分 =====
+bot.command("积分", (ctx) => {
+  const id = ctx.from.id;
+  ctx.reply(`💰积分：${getUser(id)}`);
+});
+
+// ===== 下注（支持 /bet + 中文）=====
 bot.on("text", (ctx) => {
+  const id = ctx.from.id;
   const text = ctx.message.text;
-  const id = ctx.from.id;
-bot.on("text", (ctx) => {
-  const text = ctx.message.text.trim();
-  const id = ctx.from.id;
 
-  let amount = text.match(/\d+/);
-  if (!amount) return;
-  amount = parseInt(amount[0]);
+  if (status !== "betting") return;
 
-  const balance = getUser(id);
-  if (balance < amount) return ctx.reply("❌ 积分不足");
+  let type = null;
+  let amount = null;
 
-  const result = roll();
-  let win = false;
-  let type = "";
-
-  // ===== 大小 =====
-  if (/^da|^大/.test(text)) {
-    win = [4,5,6].includes(result);
-    type = "大";
-  }
-  else if (/^x|^小/.test(text)) {
-    win = [1,2,3].includes(result);
-    type = "小";
+  // /bet DA 100
+  if (text.startsWith("/bet")) {
+    const args = text.split(" ");
+    type = (args[1] || "").toUpperCase();
+    amount = Number(args[2]);
   }
 
-  // ===== 单双 =====
-  else if (/^dan|^单|^s/.test(text)) {
-    win = [1,3,5].includes(result);
-    type = "单";
+  // 中文下注
+  if (text.startsWith("大")) {
+    type = "DA";
+    amount = Number(text.replace("大", ""));
   }
-  else if (/^shuang|^双/.test(text)) {
-    win = [2,4,6].includes(result);
-    type = "双";
+  if (text.startsWith("小")) {
+    type = "XIAO";
+    amount = Number(text.replace("小", ""));
   }
-
-  // ===== 组合 =====
-  else if (/dd|大单/.test(text)) {
-    win = (result >= 4 && result % 2 === 1);
-    type = "大单";
+  if (text.startsWith("单")) {
+    type = "DAN";
+    amount = Number(text.replace("单", ""));
   }
-  else if (/ds|大双/.test(text)) {
-    win = (result >= 4 && result % 2 === 0);
-    type = "大双";
-  }
-  else if (/xd|小单/.test(text)) {
-    win = (result <= 3 && result % 2 === 1);
-    type = "小单";
-  }
-  else if (/xs|小双/.test(text)) {
-    win = (result <= 3 && result % 2 === 0);
-    type = "小双";
+  if (text.startsWith("双")) {
+    type = "SHUAN";
+    amount = Number(text.replace("双", ""));
   }
 
-  // ===== 特码（定位胆）=====
-  else if (/dwd|定位胆|y/.test(text)) {
-    const guess = parseInt(text.match(/\d/)[0]);
-    win = guess === result;
-    type = "特码";
-  }
+  if (!type || !amount) return;
+  if (!["DA", "XIAO", "DAN", "SHUAN"].includes(type)) return;
 
-  if (!type) return;
+  if (getUser(id) < amount) return ctx.reply("❌积分不足");
 
-  if (win) {
-    users[id] += amount;
-  } else {
-    users[id] -= amount;
-  }
+  addUser(id, -amount);
+  bets[id] = { type, amount };
 
-  ctx.reply(
-`🎲 开骰：${result}
-🎯 类型：${type}
-${win ? "🎉 赢 +" : "💥 输 -"}${amount}
-💰 积分：${users[id]}`
-  );
+  ctx.reply(`✅下注成功 ${type} ${amount}`);
 });
 
-  if (parts.length !== 2) return;
+// ===== 管理员加分 =====
+bot.command("add", (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) return ctx.reply("❌无权限");
 
-  const bet = parts[0];
-  const amount = parseInt(parts[1]);
+  const args = ctx.message.text.split(" ");
+  const target = args[1];
+  const amount = Number(args[2]);
 
-  if (!["单","双","大","小"].includes(bet)) return;
-  if (isNaN(amount)) return;
+  addUser(target, amount);
+  ctx.reply(`✅已加分`);
+});
 
-  const balance = getUser(id);
+// ===== 延迟 =====
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  if (balance < amount) {
-    return ctx.reply("❌ 积分不够");
+// ===== 游戏循环 =====
+async function loop() {
+  while (true) {
+
+    // 开始下注
+    status = "betting";
+    await bot.telegram.sendMessage(GROUP_ID, "🎰 开始下注（60秒）");
+
+    await sleep(60000);
+
+    // 封盘
+    status = "closed";
+    await bot.telegram.sendMessage(GROUP_ID, "⛔ 已封盘");
+
+    await sleep(3000);
+
+    // 官方骰子
+    const msg = await bot.telegram.sendDice(GROUP_ID);
+    const v = msg.dice.value;
+
+    const bigSmall = v >= 4 ? "DA" : "XIAO";
+    const danShuang = v % 2 === 0 ? "SHUAN" : "DAN";
+
+    await bot.telegram.sendMessage(
+      GROUP_ID,
+      `🎲结果：${v}\n📊大小：${bigSmall}\n📊单双：${danShuang}`
+    );
+
+    // ===== 群内结算（你要的版本）=====
+    for (let id in bets) {
+      const b = bets[id];
+
+      let win = false;
+
+      if (b.type === bigSmall || b.type === danShuang) {
+        addUser(id, b.amount * 2);
+        win = true;
+      }
+
+      const name = userMap[id] || id;
+
+      await bot.telegram.sendMessage(
+        GROUP_ID,
+        win
+          ? `🎉 @${name} 赢了 +${b.amount * 2}\n💰积分：${getUser(id)}`
+          : `💔 @${name} 输了 -${b.amount}\n💰积分：${getUser(id)}`
+      );
+    }
+
+    bets = {};
+
+    await sleep(5000);
   }
+}
 
-  const result = roll();
-  const win = checkWin(bet, result);
+// ===== 启动 =====
+bot.launch();
+console.log("🤖 casino bot running...");
 
-  if (win) {
-    users[id] += amount;
-  } else {
-    users[id] -= amount;
-  }
-
-  ctx.reply(
-`🎲 点数：${result}
-${win ? "🎉 赢 +" : "💥 输 -"}${amount}
-💰 当前积分：${users[id]}`
-  );
-});
-
-// ===== 查询积分 =====
-bot.command("score", (ctx) => {
-  const id = ctx.from.id;
-  ctx.reply(`💰 你的积分：${getUser(id)}`);
-});
-
-bot.launch({
-  dropPendingUpdates: true
-});.then(() => {
-  console.log("🤖 bot running...");
-}).catch((err) => {
-  console.log("启动失败：", err);
-});
+loop();
