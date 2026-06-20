@@ -12,7 +12,7 @@ let users = {};
 let bets = {};
 let status = "RUN";
 
-// ================= 工具函数 =================
+// ================= 工具 =================
 function getBalance(id) {
   if (!users[id]) users[id] = 1000;
   return users[id];
@@ -24,46 +24,81 @@ function addBalance(id, amount) {
 }
 
 // ================= 菜单 =================
-const menu = Markup.keyboard([
+const userMenu = Markup.keyboard([
   ["💰 查余额", "🎰 启动"],
-  ["⛔ 暂停", "📊 排行榜"],
-  ["📜 帮助"]
+  ["📊 排行榜", "📜 帮助"]
+]).resize();
+
+const adminMenu = Markup.keyboard([
+  ["💰+100", "💰+500", "💰+1000"],
+  ["💰 查余额", "📊 排行榜"]
 ]).resize();
 
 // ================= /start =================
 bot.start((ctx) => {
   const id = ctx.from.id;
+
+  if (id === ADMIN_ID) {
+    return ctx.reply(
+`👑 管理员模式
+
+💰 余额：${getBalance(id)}
+
+请选择操作：`,
+      adminMenu
+    );
+  }
+
   ctx.reply(
-`🎰 中文赌场系统
+`🎰 欢迎进入赌场
 
-💰 当前余额：${getBalance(id)}
-
-请选择功能👇`,
-menu
+💰 余额：${getBalance(id)}`,
+    userMenu
   );
 });
 
-// ================= 功能按钮 =================
+// ================= 查余额 =================
 bot.hears("💰 查余额", (ctx) => {
   const id = ctx.from.id;
   ctx.reply(`💰 余额：${getBalance(id)}`);
 });
 
+// ================= 管理员按钮加钱 =================
+function adminAdd(ctx, amount) {
+  if (ctx.from.id !== ADMIN_ID) {
+    return ctx.reply("❌无权限");
+  }
+
+  const target = ctx.message.reply_to_message?.from?.id;
+
+  if (!target) {
+    return ctx.reply("⚠️ 请先回复要加钱的用户消息");
+  }
+
+  addBalance(target, amount);
+
+  ctx.reply(
+`✅ 已给用户 ${target} +${amount}
+💰 当前余额：${getBalance(target)}`
+  );
+}
+
+bot.hears("💰+100", (ctx) => adminAdd(ctx, 100));
+bot.hears("💰+500", (ctx) => adminAdd(ctx, 500));
+bot.hears("💰+1000", (ctx) => adminAdd(ctx, 1000));
+
+// ================= 玩法 =================
 bot.hears("📜 帮助", (ctx) => {
   ctx.reply(
 `🎮 玩法：
 大100 / 小100 / 单100 / 双100
 
-💡 初始余额：1000`
+💡 初始：1000`
   );
 });
 
 bot.hears("🎰 启动", (ctx) => {
-  ctx.reply("🎰 游戏已运行");
-});
-
-bot.hears("⛔ 暂停", (ctx) => {
-  ctx.reply("⛔ 已暂停（仅提示）");
+  ctx.reply("🎰 游戏运行中");
 });
 
 bot.hears("📊 排行榜", (ctx) => {
@@ -96,6 +131,7 @@ bot.on("text", (ctx) => {
   if (getBalance(id) < amount) return ctx.reply("❌余额不足");
 
   addBalance(id, -amount);
+
   bets[id] = { type, amount };
 
   ctx.reply(`✅下注成功 ${type} ${amount}`);
@@ -113,7 +149,7 @@ async function loop() {
     await sleep(60000);
 
     status = "STOP";
-    await bot.telegram.sendMessage(GROUP_ID, "⛔ 封盘");
+    await bot.telegram.sendMessage(GROUP_ID, "⛔封盘");
 
     await sleep(3000);
 
@@ -132,7 +168,6 @@ async function loop() {
 
     for (let id in bets) {
       const b = bets[id];
-
       const win = b.type === big || b.type === dan;
 
       if (win) addBalance(id, b.amount * 2);
@@ -140,8 +175,8 @@ async function loop() {
       await bot.telegram.sendMessage(
         GROUP_ID,
         win
-          ? `🎉 用户${id} 赢 +${b.amount * 2}\n💰余额：${getBalance(id)}`
-          : `💔 用户${id} 输 -${b.amount}\n💰余额：${getBalance(id)}`
+          ? `🎉 用户${id} 赢 +${b.amount * 2}`
+          : `💔 用户${id} 输 -${b.amount}`
       );
     }
 
@@ -150,27 +185,8 @@ async function loop() {
   }
 }
 
-// ================= 管理员加钱 =================
-bot.command("加", (ctx) => {
-  if (ctx.from.id !== ADMIN_ID) {
-    return ctx.reply("❌无权限");
-  }
-
-  const args = ctx.message.text.split(" ");
-  const target = Number(args[1]);
-  const amount = Number(args[2]);
-
-  if (!target || !amount) {
-    return ctx.reply("格式：/加 用户ID 金额");
-  }
-
-  addBalance(target, amount);
-
-  ctx.reply(`✅已加 ${target} +${amount}`);
-});
-
 // ================= 启动 =================
 bot.launch();
-console.log("🤖 赌场系统已启动");
+console.log("🤖 按钮版赌场已启动");
 
 loop();
