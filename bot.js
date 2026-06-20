@@ -178,6 +178,26 @@ async function loop() {
 
 // ================= 管理员加余额 =================
 bot.command("加", (ctx) => {
+  const admin = ctx.from.id;
+
+  if (admin !== ADMIN_ID) {
+    return ctx.reply("❌无权限");
+  }
+
+  const args = ctx.message.text.split(" ");
+  const targetId = Number(args[1]);
+  const amount = Number(args[2]);
+
+  if (!targetId || !amount) {
+    return ctx.reply("格式：/加 用户ID 金额");
+  }
+
+  if (!users[targetId]) users[targetId] = 1000;
+
+  users[targetId] += amount;
+
+  ctx.reply(`✅ 已给 ${targetId} +${amount}\n💰当前余额：${users[targetId]}`);
+});
   if (ctx.from.id !== ADMIN_ID) return;
 
   const args = ctx.message.text.split(" ");
