@@ -3,17 +3,16 @@ require('dotenv').config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// ================= 管理员 =================
-const ADMIN_ID = 8302819145;
+// ================= 配置 =================
+const ADMIN_ID = Number(process.env.ADMIN_ID);
 const GROUP_ID = process.env.GROUP_ID;
 
 // ================= 数据 =================
-let users = {};          // id -> balance
-let usernames = {};      // id -> username
+let users = {};
 let bets = {};
 let status = "RUN";
 
-// ================= 初始化余额 =================
+// ================= 工具函数 =================
 function getBalance(id) {
   if (!users[id]) users[id] = 1000;
   return users[id];
@@ -22,17 +21,6 @@ function getBalance(id) {
 function addBalance(id, amount) {
   if (!users[id]) users[id] = 1000;
   users[id] += amount;
-}
-
-// ================= 获取用户名 =================
-function getName(ctx) {
-  const id = ctx.from.id;
-  const name = ctx.from.username
-    ? `@${ctx.from.username}`
-    : ctx.from.first_name;
-
-  usernames[id] = name;
-  return name;
 }
 
 // ================= 菜单 =================
@@ -45,60 +33,47 @@ const menu = Markup.keyboard([
 // ================= /start =================
 bot.start((ctx) => {
   const id = ctx.from.id;
-  const name = getName(ctx);
-
   ctx.reply(
-`🎰 欢迎进入中文赌场系统
+`🎰 中文赌场系统
 
-👤 用户：${name}
-💰 余额：${getBalance(id)}
+💰 当前余额：${getBalance(id)}
 
-请选择功能：`,
-    menu
+请选择功能👇`,
+menu
   );
 });
 
-// ================= 查余额 =================
+// ================= 功能按钮 =================
 bot.hears("💰 查余额", (ctx) => {
   const id = ctx.from.id;
-  const name = getName(ctx);
-
-  ctx.reply(`👤 ${name}\n💰 当前余额：${getBalance(id)}`);
+  ctx.reply(`💰 余额：${getBalance(id)}`);
 });
 
-// ================= 帮助 =================
 bot.hears("📜 帮助", (ctx) => {
   ctx.reply(
 `🎮 玩法：
-
-下注：
 大100 / 小100 / 单100 / 双100
-
-系统自动开奖
 
 💡 初始余额：1000`
   );
 });
 
-// ================= 启动 =================
 bot.hears("🎰 启动", (ctx) => {
-  ctx.reply("🎰 已启动下注阶段（系统运行中）");
+  ctx.reply("🎰 游戏已运行");
 });
 
-// ================= 暂停 =================
 bot.hears("⛔ 暂停", (ctx) => {
-  ctx.reply("⛔ 系统暂停（仅显示，不影响运行逻辑）");
+  ctx.reply("⛔ 已暂停（仅提示）");
 });
 
-// ================= 排行榜（简化版） =================
 bot.hears("📊 排行榜", (ctx) => {
-  let list = Object.entries(users)
+  const list = Object.entries(users)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
-    .map(([id, bal], i) => `${i + 1}. ${usernames[id] || id} - ${bal}`)
+    .map(([id, bal], i) => `${i + 1}. ${id} - ${bal}`)
     .join("\n");
 
-  ctx.reply("🏆 排行榜：\n" + list);
+  ctx.reply("🏆排行榜：\n" + list);
 });
 
 // ================= 下注 =================
@@ -145,29 +120,28 @@ async function loop() {
     const msg = await bot.telegram.sendDice(GROUP_ID);
     const v = msg.dice.value;
 
-    const bigSmall = v >= 4 ? "DA" : "XIAO";
-    const danShuang = v % 2 === 0 ? "SHUAN" : "DAN";
+    const big = v >= 4 ? "DA" : "XIAO";
+    const dan = v % 2 === 0 ? "SHUAN" : "DAN";
 
     await bot.telegram.sendMessage(
       GROUP_ID,
 `🎲结果：${v}
-📊大小：${bigSmall === "DA" ? "大" : "小"}
-📊单双：${danShuang === "DAN" ? "单" : "双"}`
+📊大小：${big === "DA" ? "大" : "小"}
+📊单双：${dan === "DAN" ? "单" : "双"}`
     );
 
     for (let id in bets) {
       const b = bets[id];
-      const name = usernames[id] || id;
 
-      const win = b.type === bigSmall || b.type === danShuang;
+      const win = b.type === big || b.type === dan;
 
       if (win) addBalance(id, b.amount * 2);
 
       await bot.telegram.sendMessage(
         GROUP_ID,
         win
-          ? `🎉 ${name} 赢 +${b.amount * 2}\n💰余额：${getBalance(id)}`
-          : `💔 ${name} 输 -${b.amount}\n💰余额：${getBalance(id)}`
+          ? `🎉 用户${id} 赢 +${b.amount * 2}\n💰余额：${getBalance(id)}`
+          : `💔 用户${id} 输 -${b.amount}\n💰余额：${getBalance(id)}`
       );
     }
 
@@ -176,44 +150,27 @@ async function loop() {
   }
 }
 
-// ================= 管理员加余额 =================
+// ================= 管理员加钱 =================
 bot.command("加", (ctx) => {
-  const admin = ctx.from.id;
-
-  if (admin !== ADMIN_ID) {
+  if (ctx.from.id !== ADMIN_ID) {
     return ctx.reply("❌无权限");
   }
 
   const args = ctx.message.text.split(" ");
-  const targetId = Number(args[1]);
+  const target = Number(args[1]);
   const amount = Number(args[2]);
 
-  if (!targetId || !amount) {
+  if (!target || !amount) {
     return ctx.reply("格式：/加 用户ID 金额");
   }
 
-  if (!users[targetId]) users[targetId] = 1000;
+  addBalance(target, amount);
 
-  users[targetId] += amount;
-
-  ctx.reply(`✅ 已给 ${targetId} +${amount}\n💰当前余额：${users[targetId]}`);
-});
-  if (ctx.from.id !== ADMIN_ID) return;
-
-  const args = ctx.message.text.split(" ");
-  const target = args[1];
-  const amount = Number(args[2]);
-
-  const id = Object.keys(usernames).find(k => usernames[k] === target || usernames[k] === "@" + target);
-
-  if (!id) return ctx.reply("❌找不到用户，请让他先 /start");
-
-  addBalance(id, amount);
-  ctx.reply(`✅已给 ${target} +${amount}`);
+  ctx.reply(`✅已加 ${target} +${amount}`);
 });
 
 // ================= 启动 =================
 bot.launch();
-console.log("🤖 中文赌场完整版已启动");
+console.log("🤖 赌场系统已启动");
 
 loop();
